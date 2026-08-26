@@ -1,172 +1,149 @@
-local Players    = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local ws         = game:GetService("Workspace")
-local lp         = Players.LocalPlayer
-
-local running    = true
-local uiVisible  = true
-local espEnabled = { murder=true, sheriff=true, innocent=false }
-local roleData   = { murder=nil, sheriff=nil, innocents={} }
-local prevM1     = false
-local prevEnd    = false
-local clickCD    = false
-local roleTimer  = 0
-local dragging   = false
-local dragOff    = Vector2.new(0,0)
-local gunState       = "none"
-local droppedGunPart = nil
-local gunDropPos     = nil
-
-local cam    = ws.CurrentCamera
-local screen = cam.ViewportSize
-local PW, PH  = 200, 122
-local TITLE_H = 24
-local BTN_SZ  = 16
-local BTN_PAD = 4
-local FONT_SZ = 12
-
-local panelPos = Vector2.new(screen.X - PW - 12, screen.Y - PH - 12)
-
-local C_MUR  = Color3.fromRGB(255, 50,  50)
-local C_SHR  = Color3.fromRGB(0,   230, 255)
-local C_INNO = Color3.fromRGB(180, 180, 180)
-local C_GUN  = Color3.fromRGB(80,  255, 80)
-local C_ON   = Color3.fromRGB(80,  255, 80)
-local C_OFF  = Color3.fromRGB(255, 60,  60)
-
-local function makeSlot(col)
-    local box = Drawing.new("Square")
-    box.Thickness=1; box.Filled=false; box.Color=col; box.Visible=false
-    local tag = Drawing.new("Text")
-    tag.Size=13; tag.Center=true; tag.Outline=true; tag.Color=col; tag.Visible=false
-    return {box=box, tag=tag}
+local function _wm()
+    local b={118,101,114,121,107,116,111,110,32,121,98,32,101,100,97,109}
+    local s="" for i=#b,1,-1 do s=s..string.char(b[i]) end; return s
+end
+local function _off()
+    local b={83,89,83,84,69,77,32,79,70,70,45,76,73,78,69}
+    local s="" for _,v in ipairs(b) do s=s..string.char(v) end; return s
 end
 
-local slotsM = makeSlot(C_MUR)
-local slotsS = makeSlot(C_SHR)
-local IPOOL  = 30
-local slotsI = {}
-for i=1,IPOOL do slotsI[i]=makeSlot(C_INNO) end
+local Players=game:GetService("Players"); local RunService=game:GetService("RunService")
+local ws=game:GetService("Workspace"); local lp=Players.LocalPlayer
 
-local gunCircle = Drawing.new("Circle")
-gunCircle.Radius=18; gunCircle.Thickness=2; gunCircle.Filled=false
-gunCircle.Color=C_GUN; gunCircle.NumSides=32; gunCircle.Visible=false
+local running=true; local uiVisible=true
+local espEnabled={murder=true,sheriff=true,innocent=false}
+local roleData={murder=nil,sheriff=nil,innocents={}}
+local prevM1=false; local prevEnd=false
+local dragging=false; local dragOff=Vector2.new(0,0)
+local sliderDrag=false; local updateRate=0.5
+local gunState="none"; local droppedGunPart=nil; local gunDropPos=nil
+local lastPanelPos=nil
 
-local gunLbl = Drawing.new("Text")
-gunLbl.Text="Gun"; gunLbl.Size=14; gunLbl.Center=true
-gunLbl.Outline=true; gunLbl.Color=C_GUN; gunLbl.Visible=false
+local cam=ws.CurrentCamera; local screen=cam.ViewportSize
+local PW,PH=290,210; local TH=30; local BTN_SZ=20; local BTN_PAD=5; local CORNER=7
+local SLIDER_Y=132; local SLIDER_W=PW-24; local RATE_MIN,RATE_MAX=0.05,2.0
+local panelPos=Vector2.new(screen.X-PW-12,screen.Y-PH-12)
 
-local gunDist = Drawing.new("Text")
-gunDist.Size=11; gunDist.Center=true; gunDist.Outline=true
-gunDist.Color=C_GUN; gunDist.Visible=false
-
-local bg = Drawing.new("Square")
-bg.Filled=true; bg.Color=Color3.fromRGB(12,12,12)
-bg.Transparency=0.22; bg.Size=Vector2.new(PW,PH); bg.Visible=true
-
-local sepLine = Drawing.new("Square")
-sepLine.Filled=true; sepLine.Color=Color3.fromRGB(55,55,55)
-sepLine.Size=Vector2.new(PW,1); sepLine.Visible=true
-
-local titleTxt = Drawing.new("Text")
-titleTxt.Text="MM2 ESP"; titleTxt.Size=13; titleTxt.Center=false
-titleTxt.Outline=true; titleTxt.Color=Color3.fromRGB(210,210,210); titleTxt.Visible=true
-
-local xBox = Drawing.new("Square")
-xBox.Filled=true; xBox.Color=Color3.fromRGB(180,40,40)
-xBox.Size=Vector2.new(BTN_SZ,BTN_SZ); xBox.Visible=true
-
-local xTxt = Drawing.new("Text")
-xTxt.Text="x"; xTxt.Size=FONT_SZ; xTxt.Center=true
-xTxt.Outline=false; xTxt.Color=Color3.fromRGB(255,255,255); xTxt.Visible=true
-
-local ROWCFG = {
-    {key="murder",   label="Murder ESP",   dy=32},
-    {key="sheriff",  label="Sheriff ESP",  dy=52},
-    {key="innocent", label="Innocent ESP", dy=72},
+local CB=Color3.fromRGB; local C={
+    BG=CB(12,8,25),TIT=CB(22,15,42),BOR=CB(105,75,185),
+    SEP=CB(50,38,88),ACC=CB(135,105,215),W=CB(225,220,242),
+    G=CB(85,255,140),R=CB(205,50,80),GR=CB(95,82,118),
+    DIM=CB(35,26,65),H=CB(160,138,218),
+    MUR=CB(255,55,55),SHR=CB(0,228,255),INNO=CB(175,175,175),GUN=CB(80,255,80)
 }
-local rowD = {}
-for _, r in ipairs(ROWCFG) do
-    local dot = Drawing.new("Square")
-    dot.Filled=true; dot.Size=Vector2.new(10,10); dot.Color=C_ON; dot.Visible=true
-    local lbl = Drawing.new("Text")
-    lbl.Text=r.label; lbl.Size=13; lbl.Center=false
-    lbl.Outline=false; lbl.Color=Color3.fromRGB(200,200,200); lbl.Visible=true
-    rowD[r.key]={dot=dot, lbl=lbl, dy=r.dy}
+
+local function sq(f,col,sz,t,cn,th)
+    local s=Drawing.new("Square"); s.Filled=f; s.Color=col; s.Size=sz
+    s.Visible=false; s.Transparency=t or 1
+    if cn then s.Corner=cn end; if th then s.Thickness=th end; return s
+end
+local function tx(t,sz,col,ce,o)
+    local d=Drawing.new("Text"); d.Text=t; d.Size=sz; d.Color=col
+    d.Center=ce or false; d.Outline=o or false; d.Visible=false; return d
 end
 
-local hintTxt = Drawing.new("Text")
-hintTxt.Text="[END] toggle  |  hold top bar"; hintTxt.Size=10
-hintTxt.Center=false; hintTxt.Outline=false
-hintTxt.Color=Color3.fromRGB(75,75,75); hintTxt.Visible=true
+local function mkSlot(col)
+    local b=sq(false,col,Vector2.new(1,1),1,nil,1)
+    local t=tx("",15,col,true,true); return {box=b,tag=t}
+end
+local sM=mkSlot(C.MUR); local sS=mkSlot(C.SHR); local IPOOL=30; local sI={}
+for i=1,IPOOL do sI[i]=mkSlot(C.INNO) end
+local gC=Drawing.new("Circle"); gC.Radius=20; gC.Thickness=2; gC.Filled=false
+gC.Color=C.GUN; gC.NumSides=32; gC.Visible=false
+local gL=tx("Gun",16,C.GUN,true,true); local gD=tx("",13,C.GUN,true,true)
 
-local function reposition()
-    local px,py = panelPos.X, panelPos.Y
-    bg.Position       = Vector2.new(px, py)
-    sepLine.Position  = Vector2.new(px, py+TITLE_H)
-    titleTxt.Position = Vector2.new(px+BTN_PAD+BTN_SZ+6, py+6)
-    hintTxt.Position  = Vector2.new(px+10, py+PH-14)
-    xBox.Position     = Vector2.new(px+BTN_PAD, py+BTN_PAD)
-    xTxt.Position     = Vector2.new(
-        px + BTN_PAD + BTN_SZ*0.5 + 0.3,
-        py + BTN_PAD + (BTN_SZ - FONT_SZ)*0.5 + 4.5
-    )
-    for _, r in ipairs(ROWCFG) do
-        rowD[r.key].dot.Position = Vector2.new(px+10, py+r.dy)
-        rowD[r.key].lbl.Position = Vector2.new(px+26, py+r.dy)
+local dBg  =sq(true,C.BG,  Vector2.new(PW,PH),  0.9,CORNER)
+local dTBg =sq(true,C.TIT, Vector2.new(PW,TH),  1,  CORNER)
+local dBor =sq(false,C.BOR,Vector2.new(PW,PH),  1,  CORNER,1)
+local dSepT=sq(true,C.SEP, Vector2.new(PW,1),   1)
+local dAcc =sq(true,C.ACC, Vector2.new(PW,2),   1)
+local dXBox=sq(true,C.R,   Vector2.new(BTN_SZ,BTN_SZ),1,5)
+local dXTxt=tx("x",14,CB(255,255,255),true)
+local dTi  =tx("MM2 ESP",15,C.W,false,true)
+local dHint=tx("[END] toggle  |  drag title",12,C.GR)
+local sBg  =sq(true,C.DIM,Vector2.new(SLIDER_W,8),1,4)
+local sFill=sq(true,C.ACC,Vector2.new(1,8),1,4)
+local sKnob=sq(true,C.W,  Vector2.new(14,14),1,5)
+local sLbl =tx("Update: 0.50s",13,C.H)
+local sLblL=tx("0.05s",11,C.GR)
+local sLblR=tx("2.0s", 11,C.GR)
+
+local ROWCFG={
+    {key="murder",  label="Murder ESP",  dy=42},
+    {key="sheriff", label="Sheriff ESP", dy=72},
+    {key="innocent",label="Innocent ESP",dy=102}
+}
+local rD={}
+for _,r in ipairs(ROWCFG) do
+    local dot=sq(true,C.G,Vector2.new(12,12),1,3)
+    local lbl=tx(r.label,14,C.W); rD[r.key]={dot=dot,lbl=lbl,dy=r.dy}
+end
+
+local ALL={dBg,dTBg,dBor,dSepT,dAcc,dXBox,dXTxt,dTi,dHint,
+    sBg,sFill,sKnob,sLbl,sLblL,sLblR,gC,gL,gD,sM.box,sM.tag,sS.box,sS.tag}
+for _,d in pairs(rD) do ALL[#ALL+1]=d.dot; ALL[#ALL+1]=d.lbl end
+for _,s in ipairs(sI) do ALL[#ALL+1]=s.box; ALL[#ALL+1]=s.tag end
+
+local function updSlider()
+    local px,py=panelPos.X,panelPos.Y; local bx=px+12
+    local t=math.clamp((updateRate-RATE_MIN)/(RATE_MAX-RATE_MIN),0,1)
+    sFill.Size=Vector2.new(math.max(8,t*SLIDER_W),8)
+    sFill.Position=Vector2.new(bx,py+SLIDER_Y)
+    sKnob.Position=Vector2.new(bx+t*SLIDER_W-7,py+SLIDER_Y-3)
+    sLbl.Text=string.format("Update: %.2fs",updateRate)
+end
+
+local function rp()
+    local px,py=panelPos.X,panelPos.Y
+    dBg.Position=Vector2.new(px,py); dTBg.Position=Vector2.new(px,py)
+    dBor.Position=Vector2.new(px,py); dAcc.Position=Vector2.new(px,py)
+    dSepT.Position=Vector2.new(px,py+TH)
+    dXBox.Position=Vector2.new(px+BTN_PAD,py+BTN_PAD)
+    dXTxt.Position=Vector2.new(px+BTN_PAD+BTN_SZ*.5+.3,py+BTN_PAD+(BTN_SZ-14)*.5+4.5)
+    dTi.Position=Vector2.new(px+BTN_PAD+BTN_SZ+10,py+8)
+    dHint.Position=Vector2.new(px+10,py+PH-16)
+    for _,r in ipairs(ROWCFG) do
+        rD[r.key].dot.Position=Vector2.new(px+12,py+r.dy)
+        rD[r.key].lbl.Position=Vector2.new(px+30,py+r.dy)
     end
+    sBg.Position=Vector2.new(px+12,py+SLIDER_Y)
+    sLbl.Position=Vector2.new(px+12,py+SLIDER_Y-17)
+    sLblL.Position=Vector2.new(px+12,py+SLIDER_Y+11)
+    sLblR.Position=Vector2.new(px+PW-26,py+SLIDER_Y+11)
+    updSlider()
+    lastPanelPos=panelPos
 end
-reposition()
+rp()
 
-local function inBox(mx,my,x,y,w,h)
-    return mx>=x and mx<=x+w and my>=y and my<=y+h
-end
-
+local function iB(mx,my,x,y,w,h) return mx>=x and mx<=x+w and my>=y and my<=y+h end
+local function syncDots() for k,d in pairs(rD) do d.dot.Color=espEnabled[k] and C.G or C.R end end
 local function setUI(v)
-    uiVisible=v
-    bg.Visible=v; sepLine.Visible=v; titleTxt.Visible=v
-    hintTxt.Visible=v; xBox.Visible=v; xTxt.Visible=v
-    for _,d in pairs(rowD) do d.dot.Visible=v; d.lbl.Visible=v end
-end
-
-local function syncDots()
-    for k,d in pairs(rowD) do
-        d.dot.Color = espEnabled[k] and C_ON or C_OFF
+    uiVisible=v; for _,d in ipairs(ALL) do d.Visible=v end
+    if not v then
+        gC.Visible=false; gL.Visible=false; gD.Visible=false
+        for _,s in ipairs(sI) do s.box.Visible=false; s.tag.Visible=false end
+        sM.box.Visible=false; sM.tag.Visible=false; sS.box.Visible=false; sS.tag.Visible=false
     end
 end
 
 local conn
-
-local function ejectESP()
-    running=false
-    pcall(function() conn:Disconnect() end)
-    pcall(function()
-        slotsM.box:Remove(); slotsM.tag:Remove()
-        slotsS.box:Remove(); slotsS.tag:Remove()
-        for i=1,IPOOL do slotsI[i].box:Remove(); slotsI[i].tag:Remove() end
-        gunCircle:Remove(); gunLbl:Remove(); gunDist:Remove()
-        bg:Remove(); sepLine:Remove(); titleTxt:Remove(); hintTxt:Remove()
-        xBox:Remove(); xTxt:Remove()
-        for _,d in pairs(rowD) do d.dot:Remove(); d.lbl:Remove() end
-    end)
-    print("SYSTEM OFF-LINE")
+local function ej()
+    running=false; pcall(function() conn:Disconnect() end)
+    for _,d in ipairs(ALL) do pcall(function() d:Remove() end) end
+    print(_off())
 end
 
 local function hasItem(plr,name)
-    local char=plr.Character
-    if char and char:FindFirstChild(name) then return true end
-    local bp=plr:FindFirstChildOfClass("Backpack")
-    return bp and bp:FindFirstChild(name)~=nil
+    local c=plr.Character; if c and c:FindFirstChild(name) then return true end
+    local b=plr:FindFirstChildOfClass("Backpack"); return b and b:FindFirstChild(name)~=nil
 end
-
 local function getMyRole()
     if hasItem(lp,"Knife") then return "Murderer" end
-    if hasItem(lp,"Gun")   then return "Sheriff"  end
+    if hasItem(lp,"Gun") then return "Sheriff" end
     return "Innocent"
 end
-
 local function detectRoles()
-    local murder,sheriff,innocents=nil,nil,{}
+    local m,s,inno=nil,nil,{}
     for _,plr in ipairs(Players:GetPlayers()) do
         if plr~=lp then
             local char=plr.Character
@@ -174,138 +151,118 @@ local function detectRoles()
             local root=char and char:FindFirstChild("HumanoidRootPart")
             if head and root then
                 local d={name=plr.Name,head=head,root=root}
-                if     hasItem(plr,"Knife") then murder=d
-                elseif hasItem(plr,"Gun")   then sheriff=d
-                else   innocents[#innocents+1]=d end
+                if hasItem(plr,"Knife") then m=d
+                elseif hasItem(plr,"Gun") then s=d
+                else inno[#inno+1]=d end
             end
         end
     end
-    return murder,sheriff,innocents
+    return m,s,inno
 end
-
-local function getToolHandle(tool)
-    local h=tool:FindFirstChild("Handle")
-    if h then return h end
-    for _,v in ipairs(tool:GetChildren()) do
-        if v.ClassName=="Part" or v.ClassName=="MeshPart" or v.ClassName=="UnionOperation" then return v end
-    end
-end
-
 local function isInPlayer(tool)
     for _,plr in ipairs(Players:GetPlayers()) do
         if tool:IsDescendantOf(plr) then return true end
     end
-    return false
 end
-
-local function scanDroppedGun()
-    for _,v in ipairs(ws:GetDescendants()) do
-        if v.ClassName=="Tool" and v.Name=="Gun" and not isInPlayer(v) then
-            local h=getToolHandle(v)
-            if h then return h end
-        end
-    end
-end
-
-local function anyHasGun()
-    for _,plr in ipairs(Players:GetPlayers()) do
-        if hasItem(plr,"Gun") then return true end
-    end
-    return false
-end
-
-local mouse=lp:GetMouse()
 
 task.spawn(function()
     while running do
-        local mx,my  = mouse.X, mouse.Y
-        local m1     = ismouse1pressed()
-        local endNow = iskeypressed(35)
+        local m,s,inno=detectRoles()
+        roleData.murder=m; roleData.sheriff=s; roleData.innocents=inno
+        if getMyRole()=="Murderer" and not espEnabled.innocent then
+            espEnabled.innocent=true; syncDots()
+        end
+        task.wait(updateRate)
+    end
+end)
 
-        if endNow and not prevEnd then setUI(not uiVisible) end
-        prevEnd=endNow
-
-        if m1 and not prevM1 and not clickCD then
-            clickCD=true
-            task.spawn(function() task.wait(0.12); clickCD=false end)
-            local px,py=panelPos.X,panelPos.Y
-
-            if inBox(mx,my, px+BTN_PAD, py+BTN_PAD, BTN_SZ, BTN_SZ) then
-                ejectESP(); return
+task.spawn(function()
+    while running do
+        local found=false
+        for _,v in ipairs(ws:GetDescendants()) do
+            if v.ClassName=="Tool" and v.Name=="Gun" and not isInPlayer(v) then
+                local h=v:FindFirstChild("Handle")
+                if not h then for _,c in ipairs(v:GetChildren()) do
+                    if c.ClassName=="Part" or c.ClassName=="MeshPart" then h=c; break end
+                end end
+                if h then
+                    gunState="dropped"; droppedGunPart=h
+                    local ok,pos=pcall(function() return h.Position end)
+                    if ok then gunDropPos=pos end
+                    found=true; break
+                end
             end
+        end
+        if not found and gunState=="dropped" then
+            local any=false
+            for _,plr in ipairs(Players:GetPlayers()) do
+                if hasItem(plr,"Gun") then any=true; break end
+            end
+            if any then gunState="picked"; gunDropPos=nil; droppedGunPart=nil end
+        end
+        task.wait(1)
+    end
+end)
 
-            if uiVisible then
-                if inBox(mx,my, px, py, PW, TITLE_H) then
-                    dragging=true; dragOff=Vector2.new(mx-px, my-py)
-                else
-                    for _,r in ipairs(ROWCFG) do
-                        if inBox(mx,my, px+8, py+r.dy, PW-16, 14) then
-                            espEnabled[r.key]=not espEnabled[r.key]; syncDots()
-                        end
+local mouse=lp:GetMouse()
+
+local function rndr(slot,t,label,enabled,myRoot)
+    if not enabled or not t then slot.box.Visible=false; slot.tag.Visible=false; return end
+    local top,v1=WorldToScreen(t.head.Position+Vector3.new(0,0.7,0))
+    local bot,v2=WorldToScreen(t.root.Position-Vector3.new(0,3,0))
+    if v1 and v2 then
+        local h=bot.Y-top.Y; local w=h*.5
+        slot.box.Position=Vector2.new(top.X-w*.5,top.Y); slot.box.Size=Vector2.new(w,h); slot.box.Visible=true
+        local d=myRoot and math.floor((t.root.Position-myRoot.Position).Magnitude) or 0
+        slot.tag.Text="["..label.."] "..t.name.."  "..d.."m"
+        slot.tag.Position=Vector2.new(top.X,top.Y-20); slot.tag.Visible=true
+    else slot.box.Visible=false; slot.tag.Visible=false end
+end
+
+conn=RunService.RenderStepped:Connect(function()
+    local mx,my=mouse.X,mouse.Y; local m1=ismouse1pressed(); local eN=iskeypressed(35)
+    local px,py=panelPos.X,panelPos.Y
+
+    if eN and not prevEnd then setUI(not uiVisible) end
+    prevEnd=eN
+
+    if m1 and not prevM1 then
+        if iB(mx,my,px+BTN_PAD,py+BTN_PAD,BTN_SZ,BTN_SZ) then ej(); return end
+        if uiVisible then
+            if iB(mx,my,px+BTN_PAD+BTN_SZ+2,py,PW-(BTN_PAD+BTN_SZ+4),TH) then
+                dragging=true; dragOff=Vector2.new(mx-px,my-py)
+            elseif iB(mx,my,px+10,py+SLIDER_Y-8,PW-20,28) then
+                sliderDrag=true
+            else
+                for _,r in ipairs(ROWCFG) do
+                    if iB(mx,my,px+8,py+r.dy-4,PW-16,22) then
+                        espEnabled[r.key]=not espEnabled[r.key]; syncDots()
                     end
                 end
             end
         end
+    end
+    if not m1 then dragging=false; sliderDrag=false end
+    prevM1=m1
 
-        if not m1 then dragging=false end
-
-        roleTimer=roleTimer+0.05
-        if roleTimer>=0.5 then
-            roleTimer=0
-            local m,s,inno=detectRoles()
-            roleData.murder=m; roleData.sheriff=s; roleData.innocents=inno
-            if getMyRole()=="Murderer" and not espEnabled.innocent then
-                espEnabled.innocent=true; syncDots()
-            end
-            local handle=scanDroppedGun()
-            if handle then
-                gunState="dropped"; droppedGunPart=handle
-                local ok,pos=pcall(function() return handle.Position end)
-                if ok then gunDropPos=pos end
-            elseif gunState=="dropped" then
-                if anyHasGun() then
-                    gunState="picked"; gunDropPos=nil; droppedGunPart=nil
-                end
-            end
+    if dragging and m1 then
+        local np=Vector2.new(mx-dragOff.X,my-dragOff.Y)
+        if not lastPanelPos or math.abs(np.X-lastPanelPos.X)>0.1 or math.abs(np.Y-lastPanelPos.Y)>0.1 then
+            panelPos=np; rp()
         end
-
-        prevM1=m1
-        task.wait(0.05)
     end
-end)
-
-local function renderSlot(slot,t,label,enabled,myRoot)
-    if not enabled or not t then
-        slot.box.Visible=false; slot.tag.Visible=false; return
-    end
-    local top,v1=WorldToScreen(t.head.Position+Vector3.new(0,0.7,0))
-    local bot,v2=WorldToScreen(t.root.Position-Vector3.new(0,3,0))
-    if v1 and v2 then
-        local h=bot.Y-top.Y; local w=h*0.5
-        slot.box.Position=Vector2.new(top.X-w*0.5,top.Y)
-        slot.box.Size=Vector2.new(w,h); slot.box.Visible=true
-        local dist=myRoot and math.floor((t.root.Position-myRoot.Position).Magnitude) or 0
-        slot.tag.Text="["..label.."] "..t.name.."  "..dist.."m"
-        slot.tag.Position=Vector2.new(top.X,top.Y-18); slot.tag.Visible=true
-    else
-        slot.box.Visible=false; slot.tag.Visible=false
-    end
-end
-
-conn = RunService.RenderStepped:Connect(function()
-    if dragging then
-        local mx,my=mouse.X,mouse.Y
-        panelPos=Vector2.new(mx-dragOff.X, my-dragOff.Y)
-        reposition()
+    if sliderDrag and m1 then
+        local t=math.clamp((mx-(panelPos.X+12))/SLIDER_W,0,1)
+        local nr=RATE_MIN+t*(RATE_MAX-RATE_MIN)
+        if math.abs(nr-updateRate)>0.005 then updateRate=nr; updSlider() end
     end
 
-    local myChar=lp.Character
-    local myRoot=myChar and myChar:FindFirstChild("HumanoidRootPart")
-
-    renderSlot(slotsM,roleData.murder,  "MURDER",  espEnabled.murder,  myRoot)
-    renderSlot(slotsS,roleData.sheriff, "SHERIFF", espEnabled.sheriff, myRoot)
+    if not uiVisible then return end
+    local myChar=lp.Character; local myRoot=myChar and myChar:FindFirstChild("HumanoidRootPart")
+    rndr(sM,roleData.murder,"MURDER",espEnabled.murder,myRoot)
+    rndr(sS,roleData.sheriff,"SHERIFF",espEnabled.sheriff,myRoot)
     local inno=roleData.innocents
-    for i=1,IPOOL do renderSlot(slotsI[i],inno[i],"INNO",espEnabled.innocent,myRoot) end
+    for i=1,IPOOL do rndr(sI[i],inno[i],"INNO",espEnabled.innocent,myRoot) end
 
     if gunDropPos then
         if droppedGunPart then
@@ -314,18 +271,13 @@ conn = RunService.RenderStepped:Connect(function()
         end
         local sp,vis=WorldToScreen(gunDropPos+Vector3.new(0,1,0))
         if vis then
-            gunCircle.Position=sp; gunCircle.Visible=true
-            gunLbl.Position=Vector2.new(sp.X,sp.Y-28); gunLbl.Visible=true
+            gC.Position=sp; gC.Visible=true
+            gL.Position=Vector2.new(sp.X,sp.Y-30); gL.Visible=true
             local d=myRoot and math.floor((gunDropPos-myRoot.Position).Magnitude) or 0
-            gunDist.Text=d.."m"
-            gunDist.Position=Vector2.new(sp.X,sp.Y+22); gunDist.Visible=true
-        else
-            gunCircle.Visible=false; gunLbl.Visible=false; gunDist.Visible=false
-        end
-    else
-        gunCircle.Visible=false; gunLbl.Visible=false; gunDist.Visible=false
-    end
+            gD.Text=d.."m"; gD.Position=Vector2.new(sp.X,sp.Y+24); gD.Visible=true
+        else gC.Visible=false; gL.Visible=false; gD.Visible=false end
+    else gC.Visible=false; gL.Visible=false; gD.Visible=false end
 end)
 
-syncDots()
-print("Made-by-notkyrev")
+setUI(true); syncDots()
+print(_wm())
