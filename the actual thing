@@ -328,4 +328,4 @@ conn = RunService.RenderStepped:Connect(function()
 end)
 
 syncDots()
-print("SYSTEM ONLINE")
+print("Made-by-notkyrev")
