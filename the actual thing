@@ -1,283 +1,1229 @@
-local function _wm()
-    local b={118,101,114,121,107,116,111,110,32,121,98,32,101,100,97,109}
-    local s="" for i=#b,1,-1 do s=s..string.char(b[i]) end; return s
+local VERSION = "2.0"
+local NAME = "Kyrev's MM2 Menu"
+
+if _G.MM2ESP and _G.MM2ESP.unload then pcall(_G.MM2ESP.unload) end
+_G.MM2ESP = {}
+
+task.spawn(function()
+
+assert(Drawing and Drawing.new, "This executor does not expose the Drawing library.")
+
+local Players = game:GetService("Players")
+while not (Players and Players.LocalPlayer) do
+    task.wait(0.1)
+    Players = game:GetService("Players")
 end
-local function _off()
-    local b={83,89,83,84,69,77,32,79,70,70,45,76,73,78,69}
-    local s="" for _,v in ipairs(b) do s=s..string.char(v) end; return s
+local RunService  = game:GetService("RunService")
+local Workspace   = game:GetService("Workspace")
+local HttpService = game:GetService("HttpService")
+local lp    = Players.LocalPlayer
+local cam   = Workspace.CurrentCamera
+local mouse = lp:GetMouse()
+
+local W2S = WorldToScreen or function(v3)
+    local sp = cam:WorldToViewportPoint(v3)
+    return Vector2.new(sp.X, sp.Y), sp.Z > 0
 end
+local now = os.clock or tick
+local KEY_MENU = 35
+local FONT = (Drawing.Fonts and Drawing.Fonts.System) or 1
 
-local Players=game:GetService("Players"); local RunService=game:GetService("RunService")
-local ws=game:GetService("Workspace"); local lp=Players.LocalPlayer
+local function _dx(t)
+    local k = 1449
+    local o = {}
+    for i = 1, #t do
+        local e = t[i]
+        local b = bit32.bxor(e, (k % 256))
+        b = (b - (k % 251)) % 256
+        o[i] = string.char(b)
+        k = (k * 33 + e + 7) % 1000003
+    end
+    return table.concat(o)
+end
+local _sig = _dx({ 134, 220, 134, 151, 237, 35, 12, 201, 38, 82, 48, 208, 23, 21, 108, 124, 163, 241, 71, 249, 225, 33 })
 
-local running=true; local uiVisible=true
-local espEnabled={murder=true,sheriff=true,innocent=false}
-local roleData={murder=nil,sheriff=nil,innocents={}}
-local prevM1=false; local prevEnd=false
-local dragging=false; local dragOff=Vector2.new(0,0)
-local sliderDrag=false; local updateRate=0.5
-local gunState="none"; local droppedGunPart=nil; local gunDropPos=nil
-local lastPanelPos=nil
+local CONFIG_DIR  = "mm2esp"
+local CONFIG_PATH = "mm2esp/config.json"
 
-local cam=ws.CurrentCamera; local screen=cam.ViewportSize
-local PW,PH=290,210; local TH=30; local BTN_SZ=20; local BTN_PAD=5; local CORNER=7
-local SLIDER_Y=132; local SLIDER_W=PW-24; local RATE_MIN,RATE_MAX=0.05,2.0
-local panelPos=Vector2.new(screen.X-PW-12,screen.Y-PH-12)
-
-local CB=Color3.fromRGB; local C={
-    BG=CB(12,8,25),TIT=CB(22,15,42),BOR=CB(105,75,185),
-    SEP=CB(50,38,88),ACC=CB(135,105,215),W=CB(225,220,242),
-    G=CB(85,255,140),R=CB(205,50,80),GR=CB(95,82,118),
-    DIM=CB(35,26,65),H=CB(160,138,218),
-    MUR=CB(255,55,55),SHR=CB(0,228,255),INNO=CB(175,175,175),GUN=CB(80,255,80)
+local C = {
+    panel   = Color3.fromRGB(9, 14, 17),
+    shell   = Color3.fromRGB(15, 23, 27),
+    header  = Color3.fromRGB(13, 22, 26),
+    border  = Color3.fromRGB(30, 92, 96),
+    accent  = Color3.fromRGB(26, 224, 208),
+    accentL = Color3.fromRGB(140, 246, 236),
+    text    = Color3.fromRGB(228, 244, 244),
+    sub     = Color3.fromRGB(112, 142, 148),
+    track   = Color3.fromRGB(22, 38, 44),
+    hover   = Color3.fromRGB(20, 44, 48),
+    white   = Color3.fromRGB(255, 255, 255),
+    murder  = Color3.fromRGB(255, 72, 72),
+    sheriff = Color3.fromRGB(60, 170, 255),
+    inno    = Color3.fromRGB(176, 190, 197),
+    coin    = Color3.fromRGB(255, 205, 66),
+    gun     = Color3.fromRGB(90, 240, 120),
+    knife   = Color3.fromRGB(255, 140, 50),
+    hp      = Color3.fromRGB(80, 230, 150),
+    hpLow   = Color3.fromRGB(240, 80, 80),
+    hpBack  = Color3.fromRGB(16, 20, 22),
+    unload  = Color3.fromRGB(255, 138, 128),
 }
 
-local function sq(f,col,sz,t,cn,th)
-    local s=Drawing.new("Square"); s.Filled=f; s.Color=col; s.Size=sz
-    s.Visible=false; s.Transparency=t or 1
-    if cn then s.Corner=cn end; if th then s.Thickness=th end; return s
-end
-local function tx(t,sz,col,ce,o)
-    local d=Drawing.new("Text"); d.Text=t; d.Size=sz; d.Color=col
-    d.Center=ce or false; d.Outline=o or false; d.Visible=false; return d
-end
-
-local function mkSlot(col)
-    local b=sq(false,col,Vector2.new(1,1),1,nil,1)
-    local t=tx("",15,col,true,true); return {box=b,tag=t}
-end
-local sM=mkSlot(C.MUR); local sS=mkSlot(C.SHR); local IPOOL=30; local sI={}
-for i=1,IPOOL do sI[i]=mkSlot(C.INNO) end
-local gC=Drawing.new("Circle"); gC.Radius=20; gC.Thickness=2; gC.Filled=false
-gC.Color=C.GUN; gC.NumSides=32; gC.Visible=false
-local gL=tx("Gun",16,C.GUN,true,true); local gD=tx("",13,C.GUN,true,true)
-
-local dBg  =sq(true,C.BG,  Vector2.new(PW,PH),  0.9,CORNER)
-local dTBg =sq(true,C.TIT, Vector2.new(PW,TH),  1,  CORNER)
-local dBor =sq(false,C.BOR,Vector2.new(PW,PH),  1,  CORNER,1)
-local dSepT=sq(true,C.SEP, Vector2.new(PW,1),   1)
-local dAcc =sq(true,C.ACC, Vector2.new(PW,2),   1)
-local dXBox=sq(true,C.R,   Vector2.new(BTN_SZ,BTN_SZ),1,5)
-local dXTxt=tx("x",14,CB(255,255,255),true)
-local dTi  =tx("MM2 ESP",15,C.W,false,true)
-local dHint=tx("[END] toggle  |  drag title",12,C.GR)
-local sBg  =sq(true,C.DIM,Vector2.new(SLIDER_W,8),1,4)
-local sFill=sq(true,C.ACC,Vector2.new(1,8),1,4)
-local sKnob=sq(true,C.W,  Vector2.new(14,14),1,5)
-local sLbl =tx("Update: 0.50s",13,C.H)
-local sLblL=tx("0.05s",11,C.GR)
-local sLblR=tx("2.0s", 11,C.GR)
-
-local ROWCFG={
-    {key="murder",  label="Murder ESP",  dy=42},
-    {key="sheriff", label="Sheriff ESP", dy=72},
-    {key="innocent",label="Innocent ESP",dy=102}
+local DEFAULTS = {
+    esp = { murder = true, sheriff = true, innocent = false, gun = true, coins = true, knife = true },
+    features = { healthbar = true, tracers = false, murdererAlert = true, sheriffAlert = false, watermark = true, autoCoins = false, autoKnife = false },
+    alertRadius = 60,
+    updateRate = 0.2,
+    activeTab = "ESP",
+    menuX = cam.ViewportSize.X - 452,
+    menuY = cam.ViewportSize.Y - 400,
 }
-local rD={}
-for _,r in ipairs(ROWCFG) do
-    local dot=sq(true,C.G,Vector2.new(12,12),1,3)
-    local lbl=tx(r.label,14,C.W); rD[r.key]={dot=dot,lbl=lbl,dy=r.dy}
+
+local T = {
+    rateMin = 0.01, rateMax = 1.0, radiusMin = 10, radiusMax = 200,
+    innoPool = 18, coinPool = 64, boxRatio = 0.5,
+    menuW = 416, menuH = 380, titleH = 44, tabH = 36,
+    rowH = 40, pad = 18, animSpeed = 14, toggleSpeed = 7, tabSpeed = 11, sliderSpeed = 16, dragFollow = 28, minimizeSpeed = 13, openSpeed = 10,
+    fTitle = 19, fTab = 15, fRow = 16, fSmall = 13, fClose = 18,
+    ripplePool = 6, rippleLife = 0.5, rippleMax = 58,
+    auto = { tick = 0.05, stepDist = 2.5, reachDist = 4, hugDepth = 5, liftAbove = 3, collectTimeout = 0.9, collectDwell = 0.06, jiggle = 3, idleWait = 0.2, threatDist = 16, visitCooldown = 1.5, surfaceUp = 4 },
+    knife = { range = 5, cd = 0.9, tick = 0.05, equipKey = 0x31 },
+    gunOffsetY = -3,
+    z = {
+        shell = 11, panel = 12, header = 13, hover = 14,
+        ripple = 15, accent = 16, border = 17, content = 18, control = 19, knob = 20,
+    },
+}
+
+local state = {
+    running = true,
+    menuOpen = true,
+    esp = {},
+    features = {},
+    alertRadius = DEFAULTS.alertRadius,
+    updateRate = DEFAULTS.updateRate,
+    activeTab = DEFAULTS.activeTab,
+    menuPos = Vector2.new(DEFAULTS.menuX, DEFAULTS.menuY),
+    selfRole = "Innocent",
+    wasMurderer = false,
+    sheriffSeen = false,
+    minimized = false,
+    roles = { murder = nil, sheriff = nil, innocents = {} },
+    coins = {},
+    coinCount = 0,
+    coinContainer = nil,
+    coinBags = nil,
+    bagFull = false,
+    gunPos = nil,
+    knifePos = nil,
+    gunDropPos = nil,
+    lastSheriffPos = nil,
+    originPos = cam.CFrame.Position,
+}
+for k, v in pairs(DEFAULTS.esp) do state.esp[k] = v end
+for k, v in pairs(DEFAULTS.features) do state.features[k] = v end
+
+local function approach(cur, target, dt, speed)
+    return cur + (target - cur) * math.min(1, (speed or T.animSpeed) * dt)
+end
+local function lerpColor(a, b, t)
+    return Color3.new(a.R + (b.R - a.R) * t, a.G + (b.G - a.G) * t, a.B + (b.B - a.B) * t)
+end
+local function inRect(mx, my, x, y, w, h)
+    return mx >= x and mx <= x + w and my >= y and my <= y + h
 end
 
-local ALL={dBg,dTBg,dBor,dSepT,dAcc,dXBox,dXTxt,dTi,dHint,
-    sBg,sFill,sKnob,sLbl,sLblL,sLblR,gC,gL,gD,sM.box,sM.tag,sS.box,sS.tag}
-for _,d in pairs(rD) do ALL[#ALL+1]=d.dot; ALL[#ALL+1]=d.lbl end
-for _,s in ipairs(sI) do ALL[#ALL+1]=s.box; ALL[#ALL+1]=s.tag end
-
-local function updSlider()
-    local px,py=panelPos.X,panelPos.Y; local bx=px+12
-    local t=math.clamp((updateRate-RATE_MIN)/(RATE_MAX-RATE_MIN),0,1)
-    sFill.Size=Vector2.new(math.max(8,t*SLIDER_W),8)
-    sFill.Position=Vector2.new(bx,py+SLIDER_Y)
-    sKnob.Position=Vector2.new(bx+t*SLIDER_W-7,py+SLIDER_Y-3)
-    sLbl.Text=string.format("Update: %.2fs",updateRate)
+local function saveConfig()
+    local snap = {
+        esp = state.esp, features = state.features,
+        alertRadius = state.alertRadius, updateRate = state.updateRate,
+        activeTab = state.activeTab, menuX = state.menuPos.X, menuY = state.menuPos.Y,
+    }
+    pcall(function()
+        if isfolder and not isfolder(CONFIG_DIR) then makefolder(CONFIG_DIR) end
+        writefile(CONFIG_PATH, HttpService:JSONEncode(snap))
+    end)
 end
 
-local function rp()
-    local px,py=panelPos.X,panelPos.Y
-    dBg.Position=Vector2.new(px,py); dTBg.Position=Vector2.new(px,py)
-    dBor.Position=Vector2.new(px,py); dAcc.Position=Vector2.new(px,py)
-    dSepT.Position=Vector2.new(px,py+TH)
-    dXBox.Position=Vector2.new(px+BTN_PAD,py+BTN_PAD)
-    dXTxt.Position=Vector2.new(px+BTN_PAD+BTN_SZ*.5+.3,py+BTN_PAD+(BTN_SZ-14)*.5+4.5)
-    dTi.Position=Vector2.new(px+BTN_PAD+BTN_SZ+10,py+8)
-    dHint.Position=Vector2.new(px+10,py+PH-16)
-    for _,r in ipairs(ROWCFG) do
-        rD[r.key].dot.Position=Vector2.new(px+12,py+r.dy)
-        rD[r.key].lbl.Position=Vector2.new(px+30,py+r.dy)
+local function loadConfig()
+    pcall(function()
+        if not (isfile and isfile(CONFIG_PATH)) then return end
+        local data = HttpService:JSONDecode(readfile(CONFIG_PATH))
+        if type(data) ~= "table" then return end
+        if data.esp then for k in pairs(state.esp) do if data.esp[k] ~= nil then state.esp[k] = data.esp[k] end end end
+        if data.features then for k in pairs(state.features) do if data.features[k] ~= nil then state.features[k] = data.features[k] end end end
+        if type(data.alertRadius) == "number" then state.alertRadius = data.alertRadius end
+        if type(data.updateRate) == "number" then state.updateRate = data.updateRate end
+        if type(data.activeTab) == "string" then state.activeTab = data.activeTab end
+        if type(data.menuX) == "number" and type(data.menuY) == "number" then
+            state.menuPos = Vector2.new(data.menuX, data.menuY)
+        end
+    end)
+    state.features.autoCoins = false
+    state.features.autoKnife = false
+end
+
+local worldDraw = {}
+local menuDraw  = {}
+
+local function mk(kind, list, z)
+    local d = Drawing.new(kind)
+    d.Visible = false
+    if d.Transparency ~= nil then d.Transparency = 1 end
+    if z then d.ZIndex = z end
+    list[#list + 1] = d
+    return d
+end
+local function square(list, color, z, filled, corner)
+    local d = mk("Square", list, z)
+    d.Filled = filled ~= false
+    d.Color = color
+    d.Size = Vector2.new(1, 1)
+    if corner then d.Corner = corner end
+    return d
+end
+local function text(list, size, color, z, center, outline)
+    local d = mk("Text", list, z)
+    d.Size = size; d.Color = color; d.Center = center or false
+    d.Outline = outline == true
+    pcall(function() d.Font = FONT end)
+    return d
+end
+local function circle(list, radius, color, z, filled)
+    local d = mk("Circle", list, z)
+    d.Radius = radius; d.Color = color; d.NumSides = 48; d.Filled = filled or false
+    d.Thickness = 2
+    return d
+end
+local function line(list, color, z, thickness)
+    local d = mk("Line", list, z)
+    d.Color = color; d.Thickness = thickness or 1
+    return d
+end
+
+local zESP = 3
+local function newSlot(color)
+    return {
+        color = color,
+        box = square(worldDraw, color, zESP, false),
+        name = text(worldDraw, 16, color, zESP, true, true),
+        dist = text(worldDraw, 14, color, zESP, true, true),
+        hpBack = square(worldDraw, C.hpBack, zESP, true),
+        hpFill = square(worldDraw, C.hp, zESP, true),
+        tracer = line(worldDraw, color, zESP, 1),
+    }
+end
+local sMurder = newSlot(C.murder)
+local sSheriff = newSlot(C.sheriff)
+local sInno = {}
+for i = 1, T.innoPool do sInno[i] = newSlot(C.inno) end
+
+local coinPts = {}
+for i = 1, T.coinPool do
+    coinPts[i] = { dot = circle(worldDraw, 5, C.coin, zESP, true) }
+end
+
+local function newMarker(color, label, offset)
+    return {
+        ring = circle(worldDraw, 16, color, zESP, false),
+        name = text(worldDraw, 16, color, zESP, true, true),
+        dist = text(worldDraw, 14, color, zESP, true, true),
+        text = label,
+        offset = offset or Vector3.new(0, 1, 0),
+    }
+end
+local gunMarker = newMarker(C.gun, "GUN", Vector3.new(0, T.gunOffsetY, 0))
+local knifeMarker = newMarker(C.knife, "KNIFE")
+
+local alertM = text(worldDraw, 26, C.murder, 5, true, true)
+local alertS = text(worldDraw, 24, C.sheriff, 5, true, true)
+local hud = text(worldDraw, 16, C.accentL, 5, false, true)
+local _sg = text(worldDraw, 14, C.accentL, 6, false, true)
+
+local function roleOf(plr)
+    local char = plr.Character
+    if char then
+        if char:FindFirstChild("Knife") then return "Murderer" end
+        if char:FindFirstChild("Gun") then return "Sheriff" end
     end
-    sBg.Position=Vector2.new(px+12,py+SLIDER_Y)
-    sLbl.Position=Vector2.new(px+12,py+SLIDER_Y-17)
-    sLblL.Position=Vector2.new(px+12,py+SLIDER_Y+11)
-    sLblR.Position=Vector2.new(px+PW-26,py+SLIDER_Y+11)
-    updSlider()
-    lastPanelPos=panelPos
-end
-rp()
-
-local function iB(mx,my,x,y,w,h) return mx>=x and mx<=x+w and my>=y and my<=y+h end
-local function syncDots() for k,d in pairs(rD) do d.dot.Color=espEnabled[k] and C.G or C.R end end
-local function setUI(v)
-    uiVisible=v; for _,d in ipairs(ALL) do d.Visible=v end
-    if not v then
-        gC.Visible=false; gL.Visible=false; gD.Visible=false
-        for _,s in ipairs(sI) do s.box.Visible=false; s.tag.Visible=false end
-        sM.box.Visible=false; sM.tag.Visible=false; sS.box.Visible=false; sS.tag.Visible=false
+    local bp = plr:FindFirstChildOfClass("Backpack")
+    if bp then
+        if bp:FindFirstChild("Knife") then return "Murderer" end
+        if bp:FindFirstChild("Gun") then return "Sheriff" end
     end
-end
-
-local conn
-local function ej()
-    running=false; pcall(function() conn:Disconnect() end)
-    for _,d in ipairs(ALL) do pcall(function() d:Remove() end) end
-    print(_off())
-end
-
-local function hasItem(plr,name)
-    local c=plr.Character; if c and c:FindFirstChild(name) then return true end
-    local b=plr:FindFirstChildOfClass("Backpack"); return b and b:FindFirstChild(name)~=nil
-end
-local function getMyRole()
-    if hasItem(lp,"Knife") then return "Murderer" end
-    if hasItem(lp,"Gun") then return "Sheriff" end
     return "Innocent"
 end
-local function detectRoles()
-    local m,s,inno=nil,nil,{}
-    for _,plr in ipairs(Players:GetPlayers()) do
-        if plr~=lp then
-            local char=plr.Character
-            local head=char and char:FindFirstChild("Head")
-            local root=char and char:FindFirstChild("HumanoidRootPart")
-            if head and root then
-                local d={name=plr.Name,head=head,root=root}
-                if hasItem(plr,"Knife") then m=d
-                elseif hasItem(plr,"Gun") then s=d
-                else inno[#inno+1]=d end
+
+local function readPos(inst)
+    local ok, p = pcall(function() return inst.Position end)
+    if ok and typeof(p) == "Vector3" then return p end
+    return nil
+end
+
+local function snapshotPlayer(plr)
+    local char = plr.Character
+    local head = char and char:FindFirstChild("Head")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not (head and root) then return nil end
+    local hp, rp = readPos(head), readPos(root)
+    if not (hp and rp) then return nil end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local health, maxHealth = 0, 0
+    if hum then
+        local okh = pcall(function() health = hum.Health; maxHealth = hum.MaxHealth end)
+        if not okh then health, maxHealth = 0, 0 end
+    end
+    return { name = plr.Name, headPos = hp, rootPos = rp, health = health, maxHealth = maxHealth }
+end
+
+local function collectRoles()
+    local m, s, inno = nil, nil, {}
+    local myId = lp.UserId
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.UserId ~= myId then
+            local snap = snapshotPlayer(plr)
+            local dead = snap and snap.maxHealth > 0 and snap.health <= 0
+            if snap and not dead then
+                local role = roleOf(plr)
+                if role == "Murderer" then m = snap
+                elseif role == "Sheriff" then s = snap
+                else inno[#inno + 1] = snap end
             end
         end
     end
-    return m,s,inno
-end
-local function isInPlayer(tool)
-    for _,plr in ipairs(Players:GetPlayers()) do
-        if tool:IsDescendantOf(plr) then return true end
-    end
+    state.roles.murder = m
+    state.roles.sheriff = s
+    state.roles.innocents = inno
 end
 
-task.spawn(function()
-    while running do
-        local m,s,inno=detectRoles()
-        roleData.murder=m; roleData.sheriff=s; roleData.innocents=inno
-        if getMyRole()=="Murderer" and not espEnabled.innocent then
-            espEnabled.innocent=true; syncDots()
+local function resolveCoinContainer()
+    local cc = state.coinContainer
+    if cc then
+        local ok, parent = pcall(function() return cc.Parent end)
+        if ok and parent then return cc end
+    end
+    local direct = Workspace:FindFirstChild("CoinContainer")
+    if direct then state.coinContainer = direct; return direct end
+    for _, child in ipairs(Workspace:GetChildren()) do
+        local found = child:FindFirstChild("CoinContainer")
+        if found then state.coinContainer = found; return found end
+    end
+    state.coinContainer = nil
+    return nil
+end
+
+local function collectCoins()
+    local coins = {}
+    local cc = resolveCoinContainer()
+    if cc then
+        for _, child in ipairs(cc:GetChildren()) do
+            if child.Name == "Coin_Server" and child:FindFirstChild("TouchInterest") then
+                local p = readPos(child)
+                if p then coins[#coins + 1] = { part = child, pos = p } end
+            end
         end
-        task.wait(updateRate)
     end
-end)
+    state.coins = coins
+    state.coinCount = #coins
+    if #coins == 0 then state.coinContainer = nil end
+end
 
-task.spawn(function()
-    while running do
-        local found=false
-        for _,v in ipairs(ws:GetDescendants()) do
-            if v.ClassName=="Tool" and v.Name=="Gun" and not isInPlayer(v) then
-                local h=v:FindFirstChild("Handle")
-                if not h then for _,c in ipairs(v:GetChildren()) do
-                    if c.ClassName=="Part" or c.ClassName=="MeshPart" then h=c; break end
-                end end
-                if h then
-                    gunState="dropped"; droppedGunPart=h
-                    local ok,pos=pcall(function() return h.Position end)
-                    if ok then gunDropPos=pos end
-                    found=true; break
+local function gunPartPos(tool)
+    local part = tool:FindFirstChild("Handle") or tool:FindFirstChildWhichIsA("BasePart")
+    return part and readPos(part) or nil
+end
+
+local function findGroundGun()
+    for _, v in ipairs(Workspace:GetChildren()) do
+        if v.ClassName == "Tool" and v.Name == "Gun" then
+            local p = gunPartPos(v)
+            if p then return p end
+        elseif v.ClassName == "Folder" then
+            for _, c in ipairs(v:GetChildren()) do
+                if c.ClassName == "Tool" and c.Name == "Gun" then
+                    local p = gunPartPos(c)
+                    if p then return p end
                 end
             end
         end
-        if not found and gunState=="dropped" then
-            local any=false
-            for _,plr in ipairs(Players:GetPlayers()) do
-                if hasItem(plr,"Gun") then any=true; break end
-            end
-            if any then gunState="picked"; gunDropPos=nil; droppedGunPart=nil end
+    end
+    return nil
+end
+
+local function updateGunDrop()
+    local s = state.roles.sheriff
+    -- A murderer exists if another player is the murderer OR the local player is
+    -- (collectRoles excludes self, so state.roles.murder is nil when WE are the murderer).
+    local murdererPresent = (state.roles.murder ~= nil) or (state.selfRole == "Murderer")
+    if murdererPresent then state.murderSeenAt = now() end
+    local roundActive = murdererPresent or (state.murderSeenAt and (now() - state.murderSeenAt) < 2.5)
+    if not roundActive then
+        state.gunDropPos = nil
+        state.lastSheriffPos = nil
+        state.sheriffSeen = false
+        return
+    end
+    if s then
+        state.lastSheriffPos = s.rootPos
+        state.sheriffSeen = true
+        state.gunDropPos = nil
+    elseif state.sheriffSeen and state.lastSheriffPos then
+        state.gunDropPos = state.lastSheriffPos
+    end
+end
+
+local function stuckKnifePos(sk)
+    local p = readPos(sk)
+    if p then return p end
+    local part = sk:FindFirstChildWhichIsA("BasePart")
+    return part and readPos(part) or nil
+end
+
+local function collectDroppedWeapons()
+    updateGunDrop()
+    state.gunPos = state.gunDropPos or findGroundGun()
+
+    local knifePos = nil
+    for _, v in ipairs(Workspace:GetChildren()) do
+        if v.Name == "StuckKnife" then
+            local p = stuckKnifePos(v)
+            if p then knifePos = p end
         end
-        task.wait(1)
+    end
+    state.knifePos = knifePos
+end
+
+local function collectOrigin()
+    local char = lp.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    state.originPos = (root and readPos(root)) or cam.CFrame.Position
+end
+
+task.spawn(function()
+    while state.running do
+        pcall(function()
+            state.selfRole = roleOf(lp)
+            local nowMurderer = state.selfRole == "Murderer"
+            if nowMurderer and not state.wasMurderer then state.esp.innocent = true end
+            state.wasMurderer = nowMurderer
+            collectOrigin()
+            collectRoles()
+            collectCoins()
+            collectDroppedWeapons()
+        end)
+        task.wait(state.updateRate)
     end
 end)
 
-local mouse=lp:GetMouse()
-
-local function rndr(slot,t,label,enabled,myRoot)
-    if not enabled or not t then slot.box.Visible=false; slot.tag.Visible=false; return end
-    local top,v1=WorldToScreen(t.head.Position+Vector3.new(0,0.7,0))
-    local bot,v2=WorldToScreen(t.root.Position-Vector3.new(0,3,0))
-    if v1 and v2 then
-        local h=bot.Y-top.Y; local w=h*.5
-        slot.box.Position=Vector2.new(top.X-w*.5,top.Y); slot.box.Size=Vector2.new(w,h); slot.box.Visible=true
-        local d=myRoot and math.floor((t.root.Position-myRoot.Position).Magnitude) or 0
-        slot.tag.Text="["..label.."] "..t.name.."  "..d.."m"
-        slot.tag.Position=Vector2.new(top.X,top.Y-20); slot.tag.Visible=true
-    else slot.box.Visible=false; slot.tag.Visible=false end
+local noclipOn = false
+local function setNoclip(char, on)
+    if not char then return end
+    for _, part in ipairs(char:GetChildren()) do
+        if part.ClassName == "Part" or part.ClassName == "MeshPart" then
+            pcall(function() part.CanCollide = not on end)
+        end
+    end
 end
 
-conn=RunService.RenderStepped:Connect(function()
-    local mx,my=mouse.X,mouse.Y; local m1=ismouse1pressed(); local eN=iskeypressed(35)
-    local px,py=panelPos.X,panelPos.Y
+local function threatNear(pos, dist)
+    local m, s = state.roles.murder, state.roles.sheriff
+    if m and (m.rootPos - pos).Magnitude <= dist then return true end
+    if s and (s.rootPos - pos).Magnitude <= dist then return true end
+    return false
+end
 
-    if eN and not prevEnd then setUI(not uiVisible) end
-    prevEnd=eN
+local visited = {}
+local function coinKey(pos)
+    return math.floor(pos.X) .. "," .. math.floor(pos.Y) .. "," .. math.floor(pos.Z)
+end
 
-    if m1 and not prevM1 then
-        if iB(mx,my,px+BTN_PAD,py+BTN_PAD,BTN_SZ,BTN_SZ) then ej(); return end
-        if uiVisible then
-            if iB(mx,my,px+BTN_PAD+BTN_SZ+2,py,PW-(BTN_PAD+BTN_SZ+4),TH) then
-                dragging=true; dragOff=Vector2.new(mx-px,my-py)
-            elseif iB(mx,my,px+10,py+SLIDER_Y-8,PW-20,28) then
-                sliderDrag=true
-            else
-                for _,r in ipairs(ROWCFG) do
-                    if iB(mx,my,px+8,py+r.dy-4,PW-16,22) then
-                        espEnabled[r.key]=not espEnabled[r.key]; syncDots()
+local function coinAlive(part)
+    local ok, r = pcall(function()
+        return part.Parent ~= nil and part:FindFirstChild("TouchInterest") ~= nil
+    end)
+    return ok and r == true
+end
+
+local function nearestCoin(fromPos, avoidThreats)
+    local best, bestD = nil, math.huge
+    local t = now()
+    for _, c in ipairs(state.coins) do
+        if coinAlive(c.part) then
+            local blocked = avoidThreats and threatNear(c.pos, T.auto.threatDist)
+            if not blocked then
+                local v = visited[coinKey(c.pos)]
+                if not v or (t - v) > T.auto.visitCooldown then
+                    local d = (c.pos - fromPos).Magnitude
+                    if d < bestD then bestD = d; best = c end
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function tpRoot(root, pos)
+    pcall(function() root.Position = pos end)
+    pcall(function() root.Velocity = Vector3.new(0, 0, 0) end)
+end
+
+local autoTarget = nil
+local autoFloorY = nil
+
+-- Map-adaptive vertical safety. hugDepth below a THIN floor is open air (stealthy),
+-- but below a THICK floor it is inside solid geometry -> "invalid position" kick.
+-- So: find the local floor by a downward ray, then only dive under when an upward ray
+-- from the candidate point confirms open space; otherwise hover just above the floor.
+local function rcParams()
+    local ok, rp = pcall(function()
+        local p = RaycastParams.new()
+        p.FilterType = Enum.RaycastFilterType.Exclude
+        local filt = {}
+        if lp.Character then filt[#filt + 1] = lp.Character end
+        if state.coinContainer then filt[#filt + 1] = state.coinContainer end
+        p.FilterDescendantsInstances = filt
+        return p
+    end)
+    return ok and rp or nil
+end
+
+local function safeHoverY(x, z, refY)
+    local ok, y = pcall(function()
+        local rp = rcParams()
+        if not rp then return refY + T.auto.liftAbove end
+        local down = Workspace:Raycast(Vector3.new(x, refY + 8, z), Vector3.new(0, -500, 0), rp)
+        if not down then return refY + T.auto.liftAbove end
+        local floorY = down.Position.Y
+        local candUnder = floorY - T.auto.hugDepth
+        local up = Workspace:Raycast(Vector3.new(x, candUnder, z), Vector3.new(0, T.auto.hugDepth + 3, 0), rp)
+        if up and up.Instance then return candUnder end
+        return floorY + T.auto.liftAbove
+    end)
+    if ok and type(y) == "number" then return y end
+    return refY + T.auto.liftAbove
+end
+
+local function hideUnder(root, x, z)
+    if autoFloorY then tpRoot(root, Vector3.new(x, safeHoverY(x, z, autoFloorY), z)) end
+end
+
+local function resolveCoinBags()
+    local cb = state.coinBags
+    if cb then
+        local ok, p = pcall(function() return cb.Parent end)
+        if ok and p then return cb end
+    end
+    local gui = lp:FindFirstChild("PlayerGui")
+    local main = gui and gui:FindFirstChild("MainGUI")
+    local gm = main and main:FindFirstChild("Game")
+    local bags = gm and gm:FindFirstChild("CoinBags")
+    state.coinBags = bags
+    return bags
+end
+
+-- The game clones a "FullBagNotification" directly under CoinBags when a bag fills.
+-- The template lives under the inner script, so a direct child means a live "full" event.
+local function coinBagFull()
+    local bags = resolveCoinBags()
+    if not bags then return false end
+    local ok, n = pcall(function() return bags:FindFirstChild("FullBagNotification") end)
+    return ok and n ~= nil
+end
+
+-- A round is "active" while a murderer exists (with a short grace vs detection flicker).
+-- When it ends (lobby / next round), the coin bag resets, so we can resume farming.
+local function isRoundActive()
+    if state.roles.murder or state.selfRole == "Murderer" then return true end
+    return state.murderSeenAt ~= nil and (now() - state.murderSeenAt) < 2.5
+end
+
+-- Park idle under the map (or just above the floor on solid maps) without disabling
+-- auto coins, so AFK farmers keep the feature on and auto-resume next round.
+local function parkUnder(root, myPos)
+    local refY = autoFloorY or myPos.Y
+    tpRoot(root, Vector3.new(myPos.X, safeHoverY(myPos.X, myPos.Z, refY), myPos.Z))
+end
+
+task.spawn(function()
+    while state.running do
+        if state.features.autoCoins then
+            local char = lp.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if root then
+                setNoclip(char, true); noclipOn = true
+                local myPos = readPos(root) or state.originPos
+                -- Bag-full state machine: latch when the bag fills, clear when the round
+                -- ends (bag resets). While full, stay parked but keep auto coins ON.
+                if not state.bagFull then
+                    if coinBagFull() then
+                        state.bagFull = true
+                        pcall(function() notify(NAME, "Coin bag full - parked (auto coins still on)", 3) end)
                     end
+                elseif not isRoundActive() then
+                    state.bagFull = false
+                end
+                if state.bagFull then
+                    autoTarget = nil
+                    parkUnder(root, myPos)
+                    task.wait(T.auto.idleWait)
+                else
+                if not autoTarget then
+                    autoTarget = nearestCoin(myPos, true) or nearestCoin(myPos, false)
+                end
+                if autoTarget then
+                    local cpos = autoTarget.pos
+                    local cpart = autoTarget.part
+                    autoFloorY = cpos.Y
+                    local hx, hz = cpos.X - myPos.X, cpos.Z - myPos.Z
+                    local horiz = math.sqrt(hx * hx + hz * hz)
+                    if horiz <= T.auto.reachDist then
+                        -- Dwell on the coin and CONFIRM collection (TouchInterest disappears).
+                        -- Jiggle in/out to re-fire the Touched contact so the game registers it.
+                        -- Do not assume success (that caused the go-back-and-forth loop).
+                        local deadline = now() + T.auto.collectTimeout
+                        local flip = false
+                        while state.features.autoCoins and now() < deadline do
+                            if flip then
+                                tpRoot(root, cpos)
+                            else
+                                tpRoot(root, cpos + Vector3.new(0, T.auto.jiggle, 0))
+                            end
+                            flip = not flip
+                            task.wait(T.auto.collectDwell)
+                            if not coinAlive(cpart) then break end
+                        end
+                        visited[coinKey(cpos)] = now()
+                        autoTarget = nil
+                        local mp = readPos(root) or myPos
+                        hideUnder(root, mp.X, mp.Z)
+                        task.wait(T.auto.tick)
+                    else
+                        local d = math.min(T.auto.stepDist, horiz)
+                        local nx = myPos.X + (hx / horiz) * d
+                        local nz = myPos.Z + (hz / horiz) * d
+                        tpRoot(root, Vector3.new(nx, safeHoverY(nx, nz, cpos.Y), nz))
+                        task.wait(T.auto.tick)
+                    end
+                else
+                    hideUnder(root, myPos.X, myPos.Z)
+                    task.wait(T.auto.idleWait)
+                end
+                end
+            else
+                task.wait(0.2)
+            end
+        else
+            if noclipOn then pcall(function() setNoclip(lp.Character, false) end); noclipOn = false end
+            autoTarget = nil
+            visited = {}
+            state.bagFull = false
+            task.wait(0.2)
+        end
+    end
+end)
+
+-- Auto knife: undetected. Injects real input (equip key + left click) so the game's
+-- own KnifeClient fires the kill remotes; the physical swing lands the hit. No hybrid mode.
+local knifeCd = 0
+task.spawn(function()
+    while state.running do
+        if state.features.autoKnife and state.selfRole == "Murderer" and not state.menuOpen then
+            local char = lp.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local myPos = root and readPos(root)
+            if myPos then
+                local best, bestD = nil, T.knife.range
+                local s = state.roles.sheriff
+                if s then
+                    local d = (s.rootPos - myPos).Magnitude
+                    if d <= bestD then bestD = d; best = s end
+                end
+                for _, inn in ipairs(state.roles.innocents) do
+                    local d = (inn.rootPos - myPos).Magnitude
+                    if d <= bestD then bestD = d; best = inn end
+                end
+                if best and (now() - knifeCd) >= T.knife.cd then
+                    if not char:FindFirstChild("Knife") then
+                        pcall(function() keypress(T.knife.equipKey) end)
+                        task.wait(0.03)
+                        pcall(function() keyrelease(T.knife.equipKey) end)
+                        task.wait(0.12)
+                    end
+                    pcall(function()
+                        root.CFrame = CFrame.lookAt(myPos, Vector3.new(best.rootPos.X, myPos.Y, best.rootPos.Z))
+                    end)
+                    pcall(function() mouse1click() end)
+                    knifeCd = now()
                 end
             end
         end
+        task.wait(T.knife.tick)
     end
-    if not m1 then dragging=false; sliderDrag=false end
-    prevM1=m1
-
-    if dragging and m1 then
-        local np=Vector2.new(mx-dragOff.X,my-dragOff.Y)
-        if not lastPanelPos or math.abs(np.X-lastPanelPos.X)>0.1 or math.abs(np.Y-lastPanelPos.Y)>0.1 then
-            panelPos=np; rp()
-        end
-    end
-    if sliderDrag and m1 then
-        local t=math.clamp((mx-(panelPos.X+12))/SLIDER_W,0,1)
-        local nr=RATE_MIN+t*(RATE_MAX-RATE_MIN)
-        if math.abs(nr-updateRate)>0.005 then updateRate=nr; updSlider() end
-    end
-
-    if not uiVisible then return end
-    local myChar=lp.Character; local myRoot=myChar and myChar:FindFirstChild("HumanoidRootPart")
-    rndr(sM,roleData.murder,"MURDER",espEnabled.murder,myRoot)
-    rndr(sS,roleData.sheriff,"SHERIFF",espEnabled.sheriff,myRoot)
-    local inno=roleData.innocents
-    for i=1,IPOOL do rndr(sI[i],inno[i],"INNO",espEnabled.innocent,myRoot) end
-
-    if gunDropPos then
-        if droppedGunPart then
-            local ok,pos=pcall(function() return droppedGunPart.Position end)
-            if ok and pos then gunDropPos=pos end
-        end
-        local sp,vis=WorldToScreen(gunDropPos+Vector3.new(0,1,0))
-        if vis then
-            gC.Position=sp; gC.Visible=true
-            gL.Position=Vector2.new(sp.X,sp.Y-30); gL.Visible=true
-            local d=myRoot and math.floor((gunDropPos-myRoot.Position).Magnitude) or 0
-            gD.Text=d.."m"; gD.Position=Vector2.new(sp.X,sp.Y+24); gD.Visible=true
-        else gC.Visible=false; gL.Visible=false; gD.Visible=false end
-    else gC.Visible=false; gL.Visible=false; gD.Visible=false end
 end)
 
-setUI(true); syncDots()
-print(_wm())
+local function hideSlot(slot)
+    slot.box.Visible = false; slot.name.Visible = false; slot.dist.Visible = false
+    slot.hpBack.Visible = false; slot.hpFill.Visible = false; slot.tracer.Visible = false
+end
+
+local function drawSlot(slot, target, label, enabled, origin)
+    if not (enabled and target) then hideSlot(slot); return end
+    local top, v1 = W2S(target.headPos + Vector3.new(0, 0.7, 0))
+    local bot, v2 = W2S(target.rootPos - Vector3.new(0, 3, 0))
+    if not (v1 and v2) then hideSlot(slot); return end
+
+    local h = bot.Y - top.Y
+    local w = h * T.boxRatio
+    local x = top.X - w * 0.5
+    slot.box.Position = Vector2.new(x, top.Y)
+    slot.box.Size = Vector2.new(w, h)
+    slot.box.Visible = true
+
+    local d = math.floor((target.rootPos - origin).Magnitude)
+    slot.name.Text = target.name
+    slot.name.Position = Vector2.new(top.X, top.Y - 34)
+    slot.name.Visible = true
+    slot.dist.Text = "[" .. label .. "]  " .. d .. "m"
+    slot.dist.Position = Vector2.new(top.X, bot.Y + 2)
+    slot.dist.Visible = true
+
+    if state.features.healthbar and target.maxHealth > 0 then
+        local ratio = math.clamp(target.health / target.maxHealth, 0, 1)
+        slot.hpBack.Position = Vector2.new(x - 6, top.Y)
+        slot.hpBack.Size = Vector2.new(3, h)
+        slot.hpBack.Visible = true
+        slot.hpFill.Color = lerpColor(C.hpLow, C.hp, ratio)
+        slot.hpFill.Size = Vector2.new(3, h * ratio)
+        slot.hpFill.Position = Vector2.new(x - 6, top.Y + h * (1 - ratio))
+        slot.hpFill.Visible = true
+    else
+        slot.hpBack.Visible = false; slot.hpFill.Visible = false
+    end
+
+    if state.features.tracers then
+        slot.tracer.From = Vector2.new(cam.ViewportSize.X * 0.5, cam.ViewportSize.Y)
+        slot.tracer.To = Vector2.new(top.X, bot.Y)
+        slot.tracer.Visible = true
+    else
+        slot.tracer.Visible = false
+    end
+end
+
+local function hideMarker(mkr)
+    mkr.ring.Visible = false; mkr.name.Visible = false; mkr.dist.Visible = false
+end
+
+local function drawMarker(mkr, pos, enabled, origin)
+    if not (enabled and pos) then hideMarker(mkr); return end
+    local sp, vis = W2S(pos + (mkr.offset or Vector3.new(0, 1, 0)))
+    if not vis then hideMarker(mkr); return end
+    mkr.ring.Position = sp; mkr.ring.Visible = true
+    mkr.name.Text = mkr.text
+    mkr.name.Position = Vector2.new(sp.X, sp.Y - 34); mkr.name.Visible = true
+    mkr.dist.Text = math.floor((pos - origin).Magnitude) .. "m"
+    mkr.dist.Position = Vector2.new(sp.X, sp.Y + 22); mkr.dist.Visible = true
+end
+
+local alertMActive, alertSActive = false, false
+local function drawAlerts(origin)
+    local blink = math.sin(now() * 10) > 0
+    local cx = cam.ViewportSize.X * 0.5
+    local m = state.roles.murder
+    if state.features.murdererAlert and m then
+        local d = (m.rootPos - origin).Magnitude
+        if d <= state.alertRadius then
+            if not alertMActive then pcall(function() notify(NAME, "Murderer nearby", 2) end) end
+            alertMActive = true
+            alertM.Text = "! MURDERER  " .. math.floor(d) .. "m !"
+            alertM.Position = Vector2.new(cx, 58); alertM.Visible = blink
+        else alertMActive = false; alertM.Visible = false end
+    else alertMActive = false; alertM.Visible = false end
+
+    local s = state.roles.sheriff
+    if state.features.sheriffAlert and s then
+        local d = (s.rootPos - origin).Magnitude
+        if d <= state.alertRadius then
+            if not alertSActive then pcall(function() notify(NAME, "Sheriff nearby", 2) end) end
+            alertSActive = true
+            alertS.Text = "SHERIFF  " .. math.floor(d) .. "m"
+            alertS.Position = Vector2.new(cx, 88); alertS.Visible = blink
+        else alertSActive = false; alertS.Visible = false end
+    else alertSActive = false; alertS.Visible = false end
+end
+
+local function drawWorld()
+    local origin = state.originPos
+
+    if state.features.watermark then
+        local extra = ""
+        if state.features.autoCoins then extra = extra .. (state.bagFull and "   [AUTO: bag full, parked]" or "   [AUTO]") end
+        if state.features.autoKnife then extra = extra .. "   [KILL]" end
+        hud.Text = NAME .. "  v" .. VERSION .. "   You: " .. state.selfRole .. "   Coins: " .. state.coinCount .. extra
+        hud.Position = Vector2.new(16, 10); hud.Visible = true
+    else
+        hud.Visible = false
+    end
+
+    local _vy = (cam.ViewportSize and cam.ViewportSize.Y or 720) - 26
+    if _sg.Text ~= _sig then _sg.Text = _sig end
+    _sg.Position = Vector2.new(16, _vy)
+    _sg.Color = C.accentL
+    _sg.Visible = true
+
+    drawSlot(sMurder, state.roles.murder, "MURDER", state.esp.murder, origin)
+    drawSlot(sSheriff, state.roles.sheriff, "SHERIFF", state.esp.sheriff, origin)
+    local inno = state.roles.innocents
+    for i = 1, T.innoPool do drawSlot(sInno[i], inno[i], "INNO", state.esp.innocent, origin) end
+
+    for i = 1, T.coinPool do
+        local dot = coinPts[i].dot
+        local c = state.esp.coins and state.coins[i] or nil
+        local alive = false
+        if c then
+            local ok, parent = pcall(function() return c.part.Parent end)
+            alive = ok and parent ~= nil
+        end
+        if alive then
+            local sp, vis = W2S(c.pos)
+            if vis then dot.Position = sp; dot.Visible = true else dot.Visible = false end
+        else
+            dot.Visible = false
+        end
+    end
+
+    drawMarker(gunMarker, state.gunPos, state.esp.gun, origin)
+    drawMarker(knifeMarker, state.knifePos, state.esp.knife, origin)
+    drawAlerts(origin)
+end
+
+local TABS = { "ESP", "Extras", "Alert", "Config" }
+
+local shell  = square(menuDraw, C.shell, T.z.shell, true, 15)
+local panel  = square(menuDraw, C.panel, T.z.panel, true, 13)
+local header = square(menuDraw, C.header, T.z.header, true, 13)
+local border = square(menuDraw, C.border, T.z.border, false, 13)
+local accent = square(menuDraw, C.accent, T.z.accent, true)
+local titleT = text(menuDraw, T.fTitle, C.text, T.z.content, false)
+local verT   = text(menuDraw, T.fSmall, C.accent, T.z.content, false)
+local closeT = text(menuDraw, T.fClose, C.sub, T.z.control, true)
+local minTri = mk("Triangle", menuDraw, T.z.control)
+minTri.Filled = true
+minTri.Color = C.sub
+
+local tabHover = square(menuDraw, C.hover, T.z.hover, true, 8)
+local tabInd = square(menuDraw, C.accent, T.z.accent, true, 8)
+local tabTxt = {}
+for i = 1, #TABS do tabTxt[i] = text(menuDraw, T.fTab, C.sub, T.z.control, true) end
+
+local hoverBar = square(menuDraw, C.hover, T.z.hover, true, 8)
+
+local ripples = {}
+local ripplePool = {}
+for i = 1, T.ripplePool do
+    ripplePool[i] = circle(menuDraw, 1, C.accentL, T.z.ripple, true)
+end
+
+local ROWS = 6
+local rows = {}
+for i = 1, ROWS do
+    rows[i] = {
+        label = text(menuDraw, T.fRow, C.text, T.z.content, false),
+        track = square(menuDraw, C.track, T.z.control, true, 12),
+        knob = circle(menuDraw, 9, C.white, T.z.knob, true),
+        value = text(menuDraw, T.fSmall, C.sub, T.z.content, false),
+    }
+end
+
+local slider = {
+    label = text(menuDraw, T.fSmall, C.accentL, T.z.content, false),
+    bar = square(menuDraw, C.track, T.z.control, true, 7),
+    fill = square(menuDraw, C.accent, T.z.control, true, 7),
+    knob = circle(menuDraw, 8, C.white, T.z.knob, true),
+}
+
+local button = {
+    box = square(menuDraw, C.track, T.z.control, true, 10),
+    border = square(menuDraw, C.unload, T.z.border, false, 10),
+    label = text(menuDraw, T.fRow, C.unload, T.z.knob, true),
+}
+
+local anim = { toggles = {}, pulses = {}, sliders = {}, tabX = 0, tabHoverX = 0, tabHoverA = 0, hoverY = 0, hoverA = 0, menuH = T.menuH, minA = 0, openA = 0 }
+
+local function spawnRipple(x, y)
+    ripples[#ripples + 1] = { x = x, y = y, start = now() }
+    while #ripples > T.ripplePool do table.remove(ripples, 1) end
+end
+
+local function toggleGet(tbl, key) return function() return tbl[key] end end
+local function toggleSet(tbl, key)
+    return function(v) tbl[key] = v; saveConfig() end
+end
+
+local function espItems()
+    return {
+        { kind = "toggle", key = "esp.murder", label = "Murderer", get = toggleGet(state.esp, "murder"), set = toggleSet(state.esp, "murder") },
+        { kind = "toggle", key = "esp.sheriff", label = "Sheriff", get = toggleGet(state.esp, "sheriff"), set = toggleSet(state.esp, "sheriff") },
+        { kind = "toggle", key = "esp.innocent", label = "Innocent", get = toggleGet(state.esp, "innocent"), set = toggleSet(state.esp, "innocent") },
+        { kind = "toggle", key = "esp.gun", label = "Gun (ground)", get = toggleGet(state.esp, "gun"), set = toggleSet(state.esp, "gun") },
+        { kind = "toggle", key = "esp.knife", label = "Dropped Knife", get = toggleGet(state.esp, "knife"), set = toggleSet(state.esp, "knife") },
+        { kind = "toggle", key = "esp.coins", label = "Coins", get = toggleGet(state.esp, "coins"), set = toggleSet(state.esp, "coins") },
+    }
+end
+local function extrasItems()
+    return {
+        { kind = "toggle", key = "f.autoCoins", label = "Auto Coins", get = toggleGet(state.features, "autoCoins"), set = toggleSet(state.features, "autoCoins") },
+        { kind = "toggle", key = "f.autoKnife", label = "Auto Knife (murderer)", get = toggleGet(state.features, "autoKnife"), set = toggleSet(state.features, "autoKnife") },
+        { kind = "toggle", key = "f.healthbar", label = "Health bars", get = toggleGet(state.features, "healthbar"), set = toggleSet(state.features, "healthbar") },
+        { kind = "toggle", key = "f.tracers", label = "Tracers", get = toggleGet(state.features, "tracers"), set = toggleSet(state.features, "tracers") },
+        { kind = "toggle", key = "f.watermark", label = "Watermark / HUD", get = toggleGet(state.features, "watermark"), set = toggleSet(state.features, "watermark") },
+        { kind = "label", label = function() return "Coins visible: " .. state.coinCount end },
+    }
+end
+local function alertItems()
+    return {
+        { kind = "toggle", key = "f.murdererAlert", label = "Murderer alert", get = toggleGet(state.features, "murdererAlert"), set = toggleSet(state.features, "murdererAlert") },
+        { kind = "toggle", key = "f.sheriffAlert", label = "Sheriff alert", get = toggleGet(state.features, "sheriffAlert"), set = toggleSet(state.features, "sheriffAlert") },
+        { kind = "slider", key = "sl.radius", min = T.radiusMin, max = T.radiusMax,
+          get = function() return state.alertRadius end,
+          set = function(v) state.alertRadius = math.floor(v) end,
+          fmt = function(v) return "Alert radius: " .. math.floor(v) .. " studs" end },
+    }
+end
+local unload
+local renderConn
+local function configItems()
+    return {
+        { kind = "slider", key = "sl.rate", min = T.rateMin, max = T.rateMax,
+          get = function() return state.updateRate end,
+          set = function(v) state.updateRate = v end,
+          fmt = function(v) return string.format("Refresh latency: %.2fs", v) end },
+        { kind = "label", label = function() return "You are: " .. state.selfRole end },
+        { kind = "button", label = "Unload", cb = function() unload() end },
+    }
+end
+local function itemsFor(tab)
+    if tab == "ESP" then return espItems()
+    elseif tab == "Extras" then return extrasItems()
+    elseif tab == "Alert" then return alertItems()
+    else return configItems() end
+end
+
+local hits = {}
+local curDrawY = 0
+local dragging, dragOffset = false, Vector2.new(0, 0)
+local activeSlider = nil
+local prevMouse, prevMenuKey = false, false
+
+local function hideMenu()
+    for _, d in ipairs(menuDraw) do d.Visible = false end
+end
+
+local function centerY(rowY, fontSize)
+    return rowY + (T.rowH - fontSize) * 0.5
+end
+
+local function layoutChrome(px, py, W, H)
+    shell.Position = Vector2.new(px - 2, py - 2); shell.Size = Vector2.new(W + 4, H + 4); shell.Visible = true
+    panel.Position = Vector2.new(px, py); panel.Size = Vector2.new(W, H); panel.Visible = true
+    border.Position = Vector2.new(px, py); border.Size = Vector2.new(W, H); border.Thickness = 1; border.Visible = true
+    header.Position = Vector2.new(px, py); header.Size = Vector2.new(W, T.titleH); header.Visible = true
+    accent.Position = Vector2.new(px, py + T.titleH); accent.Size = Vector2.new(W, 2); accent.Visible = true
+    titleT.Text = NAME .. "   v" .. VERSION
+    titleT.Position = Vector2.new(px + T.pad, py + (T.titleH - T.fTitle) * 0.5)
+    titleT.Visible = true
+    verT.Visible = false
+
+    closeT.Text = "X"
+    closeT.Position = Vector2.new(math.floor(px + W - 16), math.floor(py + T.titleH * 0.5))
+    closeT.Visible = true
+
+    local mbx, mby, mw, mh = math.floor(px + W - 44), math.floor(py + T.titleH * 0.5), 6, 5
+    local apexY = mby + mh * (2 * anim.minA - 1)
+    local baseY = mby + mh * (1 - 2 * anim.minA)
+    minTri.PointA = Vector2.new(mbx, apexY)
+    minTri.PointB = Vector2.new(mbx - mw, baseY)
+    minTri.PointC = Vector2.new(mbx + mw, baseY)
+    minTri.Visible = true
+end
+
+local function layoutTabs(px, py, W, dt)
+    local tw = (W - T.pad * 2) / #TABS
+    local ty = py + T.titleH + 10
+    local mx, my = mouse.X, mouse.Y
+    local activeX = px + T.pad
+    local hoverX, hovering = nil, false
+    for i, name in ipairs(TABS) do
+        local tx = px + T.pad + (i - 1) * tw
+        local active = state.activeTab == name
+        tabTxt[i].Text = name
+        tabTxt[i].Color = active and C.text or C.sub
+        tabTxt[i].Position = Vector2.new(tx + tw * 0.5, ty + T.tabH * 0.5)
+        tabTxt[i].Visible = true
+        if active then activeX = tx end
+        if not dragging and inRect(mx, my, tx, ty, tw, T.tabH) then hoverX = tx; hovering = true end
+        hits[#hits + 1] = { kind = "tab", name = name, x = tx, y = ty, w = tw, h = T.tabH }
+    end
+
+    anim.tabHoverA = approach(anim.tabHoverA, hovering and 1 or 0, dt)
+    if hovering then
+        anim.tabHoverX = (anim.tabHoverA < 0.05) and hoverX or approach(anim.tabHoverX, hoverX, dt, T.tabSpeed)
+    end
+    if anim.tabHoverA > 0.02 then
+        tabHover.Position = Vector2.new(anim.tabHoverX + 4, ty + 3)
+        tabHover.Size = Vector2.new(tw - 8, T.tabH - 6)
+        tabHover.Transparency = anim.tabHoverA * 0.45
+        tabHover.Visible = true
+    else
+        tabHover.Visible = false
+    end
+
+    anim.tabX = approach(anim.tabX, activeX, dt, dragging and T.dragFollow or T.tabSpeed)
+    tabInd.Position = Vector2.new(anim.tabX + 8, ty + T.tabH - 3)
+    tabInd.Size = Vector2.new(tw - 16, 3)
+    tabInd.Visible = true
+end
+
+local function resetControls()
+    for _, r in ipairs(rows) do
+        r.label.Visible = false; r.track.Visible = false; r.knob.Visible = false; r.value.Visible = false
+    end
+    slider.label.Visible = false; slider.bar.Visible = false; slider.fill.Visible = false; slider.knob.Visible = false
+    button.box.Visible = false; button.border.Visible = false; button.label.Visible = false
+    hoverBar.Visible = false
+end
+
+local function layoutToggle(row, item, px, py, W, dt)
+    row.label.Text = item.label
+    row.label.Position = Vector2.new(px + T.pad, centerY(py, T.fRow))
+    row.label.Visible = true
+
+    local tw, th = 46, 22
+    local tx = px + W - tw - T.pad
+    local ty = py + (T.rowH - th) * 0.5
+    local on = item.get()
+    local a = anim.toggles[item.key] or (on and 1 or 0)
+    a = approach(a, on and 1 or 0, dt, T.toggleSpeed)
+    anim.toggles[item.key] = a
+
+    row.track.Position = Vector2.new(tx, ty); row.track.Size = Vector2.new(tw, th)
+    row.track.Color = lerpColor(C.track, C.accent, a); row.track.Visible = true
+
+    local pulse = 0
+    local pv = anim.pulses[item.key]
+    if pv then
+        local pt = (now() - pv) / 0.3
+        if pt < 1 then pulse = math.sin(pt * math.pi) * 2 end
+    end
+    row.knob.Radius = 9 + pulse
+    row.knob.Position = Vector2.new(tx + 11 + a * (tw - 22), ty + th * 0.5)
+    row.knob.Visible = true
+
+    hits[#hits + 1] = { kind = "toggle", set = item.set, get = item.get, key = item.key, x = px + T.pad * 0.5, y = py, w = W - T.pad, h = T.rowH }
+end
+
+local function layoutLabel(row, item, px, py)
+    row.label.Text = (type(item.label) == "function") and item.label() or item.label
+    row.label.Color = C.accentL
+    row.label.Position = Vector2.new(px + T.pad, centerY(py, T.fRow))
+    row.label.Visible = true
+end
+
+local function layoutSlider(px, py, W, item, dt)
+    local bw = W - T.pad * 2
+    local bx = px + T.pad
+    local trackY, trackH = py + 24, 14
+
+    slider.label.Text = item.fmt(item.get())
+    slider.label.Position = Vector2.new(bx, py + 2); slider.label.Visible = true
+
+    local actualT = math.clamp((item.get() - item.min) / (item.max - item.min), 0, 1)
+    local shown = anim.sliders[item.key]
+    if shown == nil then shown = actualT end
+    shown = approach(shown, actualT, dt, T.sliderSpeed)
+    anim.sliders[item.key] = shown
+
+    local r = 8
+    local kx = bx + r + shown * (bw - 2 * r)
+    slider.bar.Position = Vector2.new(bx, trackY); slider.bar.Size = Vector2.new(bw, trackH); slider.bar.Visible = true
+    slider.fill.Position = Vector2.new(bx, trackY); slider.fill.Size = Vector2.new(math.max(trackH, kx - bx), trackH); slider.fill.Visible = true
+    slider.knob.Position = Vector2.new(kx, trackY + trackH * 0.5); slider.knob.Visible = true
+
+    hits[#hits + 1] = { kind = "slider", item = item, sx = bx + r, sw = bw - 2 * r, x = bx, y = trackY - 4, w = bw, h = trackH + 8 }
+end
+
+local function layoutButton(px, py, W, item)
+    local bx, bw = px + T.pad, W - T.pad * 2
+    button.box.Position = Vector2.new(bx, py); button.box.Size = Vector2.new(bw, T.rowH); button.box.Visible = true
+    button.border.Position = Vector2.new(bx, py); button.border.Size = Vector2.new(bw, T.rowH); button.border.Thickness = 1; button.border.Visible = true
+    button.label.Text = item.label
+    button.label.Position = Vector2.new(bx + bw * 0.5, py + T.rowH * 0.5); button.label.Visible = true
+    hits[#hits + 1] = { kind = "button", cb = item.cb, x = bx, y = py, w = bw, h = T.rowH }
+end
+
+local function drawRipples()
+    for i = 1, T.ripplePool do ripplePool[i].Visible = false end
+    local i = 1
+    while i <= #ripples do
+        local r = ripples[i]
+        local t = (now() - r.start) / T.rippleLife
+        if t >= 1 then
+            table.remove(ripples, i)
+        else
+            local c = ripplePool[i]
+            if c then
+                local ease = 1 - (1 - t) * (1 - t)
+                c.Radius = math.max(1, ease * T.rippleMax)
+                c.Position = Vector2.new(r.x, r.y)
+                c.Transparency = 0.5 * (1 - t)
+                c.Visible = true
+            end
+            i = i + 1
+        end
+    end
+end
+
+local function layoutContent(px, py, W, mx, my, dt)
+    resetControls()
+    local y = py + T.titleH + T.tabH + 22
+    local usedRow = 0
+    local hoveredY = nil
+    for _, item in ipairs(itemsFor(state.activeTab)) do
+        if item.kind == "toggle" then
+            usedRow = usedRow + 1
+            if inRect(mx, my, px + T.pad * 0.5, y, W - T.pad, T.rowH) then hoveredY = y end
+            layoutToggle(rows[usedRow], item, px, y, W, dt)
+            y = y + T.rowH + 6
+        elseif item.kind == "label" then
+            usedRow = usedRow + 1
+            layoutLabel(rows[usedRow], item, px, y)
+            y = y + T.rowH + 6
+        elseif item.kind == "slider" then
+            layoutSlider(px, y, W, item, dt)
+            y = y + 50
+        elseif item.kind == "button" then
+            layoutButton(px, y, W, item)
+            y = y + T.rowH + 6
+        end
+    end
+
+    anim.hoverA = approach(anim.hoverA, hoveredY and 1 or 0, dt)
+    if hoveredY then
+        anim.hoverY = (anim.hoverA < 0.05) and hoveredY or approach(anim.hoverY, hoveredY, dt, T.tabSpeed)
+    end
+    if anim.hoverA > 0.02 then
+        hoverBar.Position = Vector2.new(px + T.pad * 0.5, anim.hoverY)
+        hoverBar.Size = Vector2.new(W - T.pad, T.rowH)
+        hoverBar.Transparency = 0.35 + anim.hoverA * 0.45
+        hoverBar.Visible = true
+    end
+end
+
+local function layoutMenu(dt)
+    hits = {}
+    local px = state.menuPos.X
+    local restY = state.menuPos.Y
+    local offY = cam.ViewportSize.Y + 20
+    local py = offY + (restY - offY) * anim.openA
+    curDrawY = py
+    local W = T.menuW
+    anim.minA = approach(anim.minA, state.minimized and 1 or 0, dt, T.minimizeSpeed)
+    anim.menuH = approach(anim.menuH, state.minimized and T.titleH or T.menuH, dt, T.minimizeSpeed)
+    layoutChrome(px, py, W, anim.menuH)
+    if anim.menuH > T.titleH + T.tabH + 30 then
+        layoutTabs(px, py, W, dt)
+        layoutContent(px, py, W, mouse.X, mouse.Y, dt)
+        drawRipples()
+    else
+        for i = 1, #TABS do tabTxt[i].Visible = false end
+        tabHover.Visible = false; tabInd.Visible = false
+        resetControls()
+        for i = 1, T.ripplePool do ripplePool[i].Visible = false end
+    end
+end
+
+local function handleMenuInput()
+    local mx, my = mouse.X, mouse.Y
+    local down = ismouse1pressed()
+    local px, py = state.menuPos.X, curDrawY
+    local W = T.menuW
+
+    if down and not prevMouse then
+        if inRect(mx, my, px + W - 28, py + 6, 28, 28) then prevMouse = down; unload(); return end
+        if inRect(mx, my, px + W - 58, py + 6, 26, 28) then prevMouse = down; state.minimized = not state.minimized; return end
+        local consumed = false
+        for _, h in ipairs(hits) do
+            if inRect(mx, my, h.x, h.y, h.w, h.h) then
+                if h.kind == "tab" then
+                    state.activeTab = h.name; saveConfig(); spawnRipple(mx, my); consumed = true
+                elseif h.kind == "toggle" then
+                    h.set(not h.get()); anim.pulses[h.key] = now(); spawnRipple(mx, my); consumed = true
+                elseif h.kind == "button" then
+                    spawnRipple(mx, my); h.cb(); return
+                elseif h.kind == "slider" then
+                    activeSlider = h; consumed = true
+                end
+                break
+            end
+        end
+        if not consumed and inRect(mx, my, px, py, W - 62, T.titleH) then
+            dragging = true; dragOffset = Vector2.new(mx - px, my - py)
+        end
+    end
+
+    if not down then
+        if dragging or activeSlider then saveConfig() end
+        dragging = false; activeSlider = nil
+    end
+    prevMouse = down
+
+    if dragging and down then
+        state.menuPos = Vector2.new(mx - dragOffset.X, my - dragOffset.Y)
+    end
+    if activeSlider and down then
+        local item = activeSlider.item
+        local t = math.clamp((mx - activeSlider.sx) / activeSlider.sw, 0, 1)
+        item.set(item.min + t * (item.max - item.min))
+    end
+end
+
+unload = function()
+    if not state.running then return end
+    state.running = false
+    pcall(function() renderConn:Disconnect() end)
+    pcall(function() setNoclip(lp.Character, false) end)
+    saveConfig()
+    for _, d in ipairs(worldDraw) do pcall(function() d.Visible = false end); pcall(function() d:Remove() end) end
+    for _, d in ipairs(menuDraw) do pcall(function() d.Visible = false end); pcall(function() d:Remove() end) end
+    pcall(function() _G.MM2ESP = nil end)
+    pcall(function() notify(NAME, "unloaded", 2) end)
+    print("[Kyrev] unloaded")
+end
+_G.MM2ESP.unload = unload
+_G.MM2ESP.state = state
+
+loadConfig()
+
+local wasOpen = false
+renderConn = RunService.RenderStepped:Connect(function(dt)
+    if not state.running then return end
+    dt = dt or 0.016
+    pcall(drawWorld)
+
+    local keyDown = iskeypressed(KEY_MENU)
+    if keyDown and not prevMenuKey then state.menuOpen = not state.menuOpen end
+    prevMenuKey = keyDown
+
+    anim.openA = approach(anim.openA, state.menuOpen and 1 or 0, dt, T.openSpeed)
+    if state.menuOpen or anim.openA > 0.02 then
+        pcall(function() layoutMenu(dt) end)
+        if state.menuOpen then pcall(handleMenuInput) end
+        wasOpen = true
+    elseif wasOpen then
+        hideMenu(); wasOpen = false
+    end
+end)
+
+pcall(function() notify(NAME, "loaded v" .. VERSION .. "  -  menu: END", 4) end)
+print("[Kyrev] loaded v" .. VERSION .. "  |  menu: END")
+
+end)
