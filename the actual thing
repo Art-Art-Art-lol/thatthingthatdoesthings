@@ -871,7 +871,11 @@ local function espItems()
 end
 local function extrasItems()
     return {
-        { kind = "toggle", key = "f.autoCoins", label = "Auto Coins", get = toggleGet(state.features, "autoCoins"), set = toggleSet(state.features, "autoCoins") },
+        { kind = "toggle", key = "f.autoCoins", label = "Auto Coins (beta)", get = toggleGet(state.features, "autoCoins"),
+          set = function(v)
+              state.features.autoCoins = v; saveConfig()
+              if v then pcall(function() notify(NAME, "Auto Coins is BETA - some maps still kick for invalid position. Not good for AFK farming rn.", 6) end) end
+          end },
         { kind = "toggle", key = "f.autoKnife", label = "Auto Knife (murderer)", get = toggleGet(state.features, "autoKnife"), set = toggleSet(state.features, "autoKnife") },
         { kind = "toggle", key = "f.healthbar", label = "Health bars", get = toggleGet(state.features, "healthbar"), set = toggleSet(state.features, "healthbar") },
         { kind = "toggle", key = "f.tracers", label = "Tracers", get = toggleGet(state.features, "tracers"), set = toggleSet(state.features, "tracers") },
